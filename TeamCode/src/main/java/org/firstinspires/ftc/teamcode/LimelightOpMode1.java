@@ -19,7 +19,7 @@ public class LimelightOpMode1 extends LinearOpMode {
 
     @Override
     public void runOpMode() throws InterruptedException {
-        telemetry.addData("runOpMode() START", 0);
+        telemetry.addData("runOpMode() START", 9 );
         telemetry.update();
 
         // Declare our motors
@@ -40,7 +40,7 @@ public class LimelightOpMode1 extends LinearOpMode {
 
         //telemetry.setMsTransmissionInterval(11);
 
-        limelight.pipelineSwitch(9);
+        limelight.pipelineSwitch(0);
 
         waitForStart();
 
