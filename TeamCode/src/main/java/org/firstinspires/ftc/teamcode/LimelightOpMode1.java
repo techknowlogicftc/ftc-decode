@@ -66,6 +66,9 @@ public class LimelightOpMode1 extends LinearOpMode {
             if (result != null) {
                 telemetry.addData("result not NULL ", true);
                 telemetry.addData("result VALID: ", result.isValid());
+                telemetry.addData("result Tx: ", result.getTx());
+                telemetry.addData("result Ty: ", result.getTy());
+
 
                 List<LLResultTypes.FiducialResult> fiducialResultList = result.getFiducialResults();
                 telemetry.addData("fiducialResultList isEmpty(): ", fiducialResultList.isEmpty());
