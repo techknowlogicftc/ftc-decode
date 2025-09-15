@@ -33,6 +33,8 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
     // State variables
     private boolean navigationActive = false;
     private boolean lastButtonState = false;
+    private int loopCounter = 0;
+    private long lastTelemetryUpdate = 0;
 
     @Override
     public void runOpMode() throws InterruptedException {
@@ -67,15 +69,28 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
         telemetry.update();
 
         while (opModeIsActive()) {
+            loopCounter++;
+            long currentTime = System.currentTimeMillis();
+            
+            // Clear telemetry for fresh display
+            telemetry.clear();
+            
+            // Add header information
+            telemetry.addData("=== AprilTag Navigation Debug ===", "");
+            telemetry.addData("Loop Counter", loopCounter);
+            telemetry.addData("Runtime (ms)", currentTime - lastTelemetryUpdate);
+            telemetry.addData("Navigation Active", navigationActive);
+            telemetry.addData("A Button Pressed", gamepad1.a);
+            
             // Check for button press to start/stop navigation
             boolean currentButtonState = gamepad1.a;
             if (currentButtonState && !lastButtonState) {
                 // Button just pressed
                 navigationActive = !navigationActive;
                 if (navigationActive) {
-                    telemetry.addData("Navigation", "STARTED - Looking for AprilTag ID " + TARGET_APRILTAG_ID);
+                    telemetry.addData("*** Navigation STARTED ***", "Looking for AprilTag ID " + TARGET_APRILTAG_ID);
                 } else {
-                    telemetry.addData("Navigation", "STOPPED");
+                    telemetry.addData("*** Navigation STOPPED ***", "Returning to manual control");
                     stopAllMotors();
                 }
             }
@@ -88,65 +103,101 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
                 performManualControl();
             }
 
+            // Always update telemetry at the end of each loop
             telemetry.update();
+            lastTelemetryUpdate = currentTime;
+            
+            // Small delay to prevent overwhelming the telemetry system
+            sleep(50);
         }
     }
 
     private void performAprilTagNavigation() {
-        LLResult result = limelight.getLatestResult();
+        telemetry.addData("--- Navigation Status ---", "");
         
-        if (result != null && result.isValid()) {
-            List<LLResultTypes.FiducialResult> fiducialResults = result.getFiducialResults();
+        LLResult result = limelight.getLatestResult();
+        telemetry.addData("Limelight Result", result != null ? "Received" : "NULL");
+        
+        if (result != null) {
+            telemetry.addData("Result Valid", result.isValid());
+            telemetry.addData("Result TX", String.format("%.2f", result.getTx()));
+            telemetry.addData("Result TY", String.format("%.2f", result.getTy()));
+            telemetry.addData("Result TA", String.format("%.2f", result.getTa()));
             
-            // Look for our target AprilTag ID
-            LLResultTypes.FiducialResult targetTag = null;
-            for (LLResultTypes.FiducialResult fiducial : fiducialResults) {
-                if (fiducial.getFiducialId() == TARGET_APRILTAG_ID) {
-                    targetTag = fiducial;
-                    break;
+            if (result.isValid()) {
+                List<LLResultTypes.FiducialResult> fiducialResults = result.getFiducialResults();
+                telemetry.addData("Fiducials Detected", fiducialResults.size());
+                
+                // Display all detected fiducials
+                for (int i = 0; i < fiducialResults.size(); i++) {
+                    LLResultTypes.FiducialResult fiducial = fiducialResults.get(i);
+                    telemetry.addData("Fiducial " + i, String.format("ID: %d, X: %.2f, Y: %.2f", 
+                        fiducial.getFiducialId(), fiducial.getTargetXDegrees(), fiducial.getTargetYDegrees()));
                 }
-            }
+                
+                // Look for our target AprilTag ID
+                LLResultTypes.FiducialResult targetTag = null;
+                for (LLResultTypes.FiducialResult fiducial : fiducialResults) {
+                    if (fiducial.getFiducialId() == TARGET_APRILTAG_ID) {
+                        targetTag = fiducial;
+                        break;
+                    }
+                }
 
-            if (targetTag != null) {
-                // Tag found! Navigate to it
-                navigateToTag(targetTag);
+                if (targetTag != null) {
+                    telemetry.addData("*** TARGET TAG FOUND ***", "ID: " + TARGET_APRILTAG_ID);
+                    // Tag found! Navigate to it
+                    navigateToTag(targetTag);
+                } else {
+                    telemetry.addData("Target Tag Status", "AprilTag ID " + TARGET_APRILTAG_ID + " not in view");
+                    telemetry.addData("Action", "Rotating to find tag");
+                    rotateToFindTag();
+                }
             } else {
-                // Tag not in view, rotate slowly to find it
-                telemetry.addData("Status", "AprilTag ID " + TARGET_APRILTAG_ID + " not in view - rotating");
+                telemetry.addData("Limelight Status", "Invalid result - rotating");
                 rotateToFindTag();
             }
         } else {
-            // No valid result, rotate to find tag
-            telemetry.addData("Status", "No valid limelight data - rotating");
+            telemetry.addData("Limelight Status", "No result - rotating");
             rotateToFindTag();
         }
     }
 
     private void navigateToTag(LLResultTypes.FiducialResult tag) {
+        telemetry.addData("--- Navigating to Tag ---", "");
+        
         // Get tag position data from the main result (not individual fiducial)
         LLResult result = limelight.getLatestResult();
         double tx = result.getTx(); // Horizontal offset from center (-29.8 to 29.8 degrees)
         double ty = result.getTy(); // Vertical offset from center (-24.85 to 24.85 degrees)
         double ta = result.getTa(); // Target area (0-100% of image)
         
-        telemetry.addData("Tag Found", "ID: " + tag.getFiducialId());
-        telemetry.addData("TX (horizontal)", tx);
-        telemetry.addData("TY (vertical)", ty);
-        telemetry.addData("TA (area)", ta);
+        telemetry.addData("Target Tag ID", tag.getFiducialId());
+        telemetry.addData("TX (horizontal)", String.format("%.2f°", tx));
+        telemetry.addData("TY (vertical)", String.format("%.2f°", ty));
+        telemetry.addData("TA (area)", String.format("%.2f%%", ta));
 
         // Calculate distance from tag (rough estimation based on area)
         // This is a simplified calculation - you may need to calibrate based on your setup
         double estimatedDistance = calculateDistanceFromArea(ta);
         
         telemetry.addData("Estimated Distance", String.format("%.1f inches", estimatedDistance));
+        telemetry.addData("Target Distance", String.format("%.1f inches", TARGET_DISTANCE_INCHES));
 
         // Calculate movement needed
         double distanceError = estimatedDistance - TARGET_DISTANCE_INCHES;
         double angleError = tx; // Horizontal offset is our angle error
 
+        telemetry.addData("Distance Error", String.format("%.1f inches", distanceError));
+        telemetry.addData("Angle Error", String.format("%.1f°", angleError));
+        telemetry.addData("Position Tolerance", String.format("%.1f inches", POSITION_TOLERANCE));
+        telemetry.addData("Angle Tolerance", String.format("%.1f°", ANGLE_TOLERANCE));
+
         // Check if we're close enough to target position
         if (Math.abs(distanceError) < POSITION_TOLERANCE && Math.abs(angleError) < ANGLE_TOLERANCE) {
-            telemetry.addData("Status", "ARRIVED at target position!");
+            telemetry.addData("*** ARRIVED ***", "At target position!");
+            telemetry.addData("Distance OK", Math.abs(distanceError) < POSITION_TOLERANCE);
+            telemetry.addData("Angle OK", Math.abs(angleError) < ANGLE_TOLERANCE);
             stopAllMotors();
             return;
         }
@@ -168,13 +219,21 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
                 -angleError / 30.0 * MOVEMENT_SPEED));
         }
 
+        telemetry.addData("Calculated Powers", "");
+        telemetry.addData("Forward Power", String.format("%.3f", forwardPower));
+        telemetry.addData("Strafe Power", String.format("%.3f", strafePower));
+        telemetry.addData("Rotate Power", String.format("%.3f", rotatePower));
+
         // Apply movement
         setMotorPowers(forwardPower, strafePower, rotatePower);
         
-        telemetry.addData("Movement", String.format("Forward: %.2f, Rotate: %.2f", forwardPower, rotatePower));
+        telemetry.addData("Action", "Moving towards target");
     }
 
     private void rotateToFindTag() {
+        telemetry.addData("--- Searching for Tag ---", "");
+        telemetry.addData("Action", "Rotating slowly to find AprilTag ID " + TARGET_APRILTAG_ID);
+        telemetry.addData("Rotation Speed", String.format("%.2f", ROTATION_SPEED));
         // Rotate slowly to find the tag
         setMotorPowers(0, 0, ROTATION_SPEED);
     }
@@ -202,12 +261,23 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
         double maxPower = Math.max(Math.max(Math.abs(frontLeftPower), Math.abs(backLeftPower)),
                                   Math.max(Math.abs(frontRightPower), Math.abs(backRightPower)));
         
+        boolean normalized = false;
         if (maxPower > 1.0) {
             frontLeftPower /= maxPower;
             backLeftPower /= maxPower;
             frontRightPower /= maxPower;
             backRightPower /= maxPower;
+            normalized = true;
         }
+
+        // Add motor power telemetry
+        telemetry.addData("--- Motor Powers ---", "");
+        telemetry.addData("Front Left", String.format("%.3f", frontLeftPower));
+        telemetry.addData("Back Left", String.format("%.3f", backLeftPower));
+        telemetry.addData("Front Right", String.format("%.3f", frontRightPower));
+        telemetry.addData("Back Right", String.format("%.3f", backRightPower));
+        telemetry.addData("Max Power", String.format("%.3f", maxPower));
+        telemetry.addData("Normalized", normalized);
 
         motorFrontLeft.setPower(frontLeftPower);
         motorBackLeft.setPower(backLeftPower);
@@ -223,10 +293,20 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
     }
 
     private void performManualControl() {
+        telemetry.addData("--- Manual Control ---", "");
+        
         // Manual control when navigation is not active
         double y = -gamepad1.left_stick_y;
         double x = gamepad1.left_stick_x * 1.1;
         double rx = gamepad1.right_stick_x;
+
+        telemetry.addData("Gamepad Input", "");
+        telemetry.addData("Left Stick Y", String.format("%.2f", gamepad1.left_stick_y));
+        telemetry.addData("Left Stick X", String.format("%.2f", gamepad1.left_stick_x));
+        telemetry.addData("Right Stick X", String.format("%.2f", gamepad1.right_stick_x));
+        telemetry.addData("Processed Y", String.format("%.2f", y));
+        telemetry.addData("Processed X", String.format("%.2f", x));
+        telemetry.addData("Processed RX", String.format("%.2f", rx));
 
         double denominator = Math.max(Math.abs(y) + Math.abs(x) + Math.abs(rx), 1);
         double frontLeftPower = (y + x + rx) / denominator;
@@ -234,11 +314,18 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
         double frontRightPower = (y - x - rx) / denominator;
         double backRightPower = (y + x - rx) / denominator;
 
+        telemetry.addData("Manual Motor Powers", "");
+        telemetry.addData("Front Left", String.format("%.3f", frontLeftPower));
+        telemetry.addData("Back Left", String.format("%.3f", backLeftPower));
+        telemetry.addData("Front Right", String.format("%.3f", frontRightPower));
+        telemetry.addData("Back Right", String.format("%.3f", backRightPower));
+
         motorFrontLeft.setPower(frontLeftPower);
         motorBackLeft.setPower(backLeftPower);
         motorFrontRight.setPower(frontRightPower);
         motorBackRight.setPower(backRightPower);
 
-        telemetry.addData("Manual Control", "Active - Use left stick to drive, right stick X to rotate");
+        telemetry.addData("Instructions", "Use left stick to drive, right stick X to rotate");
+        telemetry.addData("Press A", "to start AprilTag navigation");
     }
 }
