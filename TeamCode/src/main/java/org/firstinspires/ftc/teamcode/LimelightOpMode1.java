@@ -41,6 +41,8 @@ public class LimelightOpMode1 extends LinearOpMode {
         //telemetry.setMsTransmissionInterval(11);
 
         limelight.pipelineSwitch(9);
+        telemetry.addData("Pipeline set to", "9");
+        telemetry.update();
 
         waitForStart();
 
@@ -53,8 +55,19 @@ public class LimelightOpMode1 extends LinearOpMode {
          * Starts polling for data.
          */
         limelight.start();
-
         telemetry.addData("limelight started ", true);
+        telemetry.update();
+        
+        // Give limelight time to initialize
+        sleep(1000);
+        
+        // Ensure pipeline is set after starting
+        limelight.pipelineSwitch(0);
+        telemetry.addData("Pipeline confirmed", "0");
+        telemetry.update();
+        
+        sleep(500); // Additional time for pipeline to activate
+        telemetry.addData("Limelight initialization", "Complete");
         telemetry.update();
 
         while (opModeIsActive()) {
@@ -72,6 +85,8 @@ public class LimelightOpMode1 extends LinearOpMode {
 
                 List<LLResultTypes.FiducialResult> fiducialResultList = result.getFiducialResults();
                 telemetry.addData("fiducialResultList isEmpty(): ", fiducialResultList.isEmpty());
+                telemetry.addData("fiducialResultList size(): ", fiducialResultList.size());
+                telemetry.addData("result TA (area): ", result.getTa());
 
                 if (!fiducialResultList.isEmpty()) {
                     LLResultTypes.FiducialResult fiducialResult0 = fiducialResultList.get(0);
@@ -83,6 +98,16 @@ public class LimelightOpMode1 extends LinearOpMode {
 
                 
                 if (result.isValid()) {
+                    telemetry.addData("Fiducials Detected", fiducialResultList.size());
+                    
+                    if (!fiducialResultList.isEmpty()) {
+                        for (int i = 0; i < fiducialResultList.size(); i++) {
+                            LLResultTypes.FiducialResult fiducial = fiducialResultList.get(i);
+                            telemetry.addData("Tag " + i + " ID", fiducial.getFiducialId());
+                            telemetry.addData("Tag " + i + " X", String.format("%.2f°", fiducial.getTargetXDegrees()));
+                            telemetry.addData("Tag " + i + " Y", String.format("%.2f°", fiducial.getTargetYDegrees()));
+                        }
+                    }
 
                     Pose3D botpose = result.getBotpose();
                     telemetry.addData("tx", result.getTx());

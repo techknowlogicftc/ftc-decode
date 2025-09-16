@@ -8,8 +8,6 @@ import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 
-import org.firstinspires.ftc.robotcore.external.navigation.Pose3D;
-
 import java.util.List;
 
 @TeleOp
@@ -25,7 +23,7 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
     private static final int TARGET_APRILTAG_ID = 20;
     private static final double TARGET_DISTANCE_FEET = 3.0; // 3 feet in front of tag
     private static final double TARGET_DISTANCE_INCHES = TARGET_DISTANCE_FEET * 12.0;
-    private static final double ROTATION_SPEED = 0.3; // Speed for turning when tag not in view
+    private static final double ROTATION_SPEED = 0.4; // Speed for turning when tag not in view (increased now that detection works)
     private static final double MOVEMENT_SPEED = 0.4; // Speed for moving towards tag
     private static final double POSITION_TOLERANCE = 2.0; // Tolerance in inches
     private static final double ANGLE_TOLERANCE = 5.0; // Tolerance in degrees
@@ -34,10 +32,14 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
     private boolean navigationActive = false;
     private boolean lastButtonState = false;
     private int loopCounter = 0;
-    private long lastTelemetryUpdate = 0;
+    private long lastTagDetectionTime = 0;
+    private boolean tagRecentlyDetected = false;
+    private int detectionHistoryCount = 0;
 
     @Override
     public void runOpMode() throws InterruptedException {
+        // Use default telemetry settings for stability
+        
         telemetry.addData("AprilTag Navigation OpMode", "Initializing...");
         telemetry.update();
 
@@ -52,8 +54,8 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
         motorFrontRight.setDirection(DcMotorSimple.Direction.REVERSE);
         motorBackRight.setDirection(DcMotorSimple.Direction.REVERSE);
 
-        // Set limelight to pipeline 9 (configured for AprilTag IDs 20-24)
-        limelight.pipelineSwitch(9);
+        // Set limelight to pipeline 0 (configured 0");
+        telemetry.update();
 
         telemetry.addData("Hardware initialized", "Ready");
         telemetry.addData("Press A button to start navigation to AprilTag ID", TARGET_APRILTAG_ID);
@@ -67,6 +69,18 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
         limelight.start();
         telemetry.addData("Limelight started", "Pipeline 9 active");
         telemetry.update();
+        
+        // Give limelight time to initialize
+        sleep(1000);
+        
+        // Ensure pipeline is set after starting
+        limelight.pipelineSwitch(0);
+        telemetry.addData("Pipeline confirmed", "0");
+        telemetry.update();
+        
+        sleep(500); // Additional time for pipeline to activate
+        telemetry.addData("Limelight initialization", "Complete");
+        telemetry.update();
 
         while (opModeIsActive()) {
             loopCounter++;
@@ -78,7 +92,6 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
             // Add header information
             telemetry.addData("=== AprilTag Navigation Debug ===", "");
             telemetry.addData("Loop Counter", loopCounter);
-            telemetry.addData("Runtime (ms)", currentTime - lastTelemetryUpdate);
             telemetry.addData("Navigation Active", navigationActive);
             telemetry.addData("A Button Pressed", gamepad1.a);
             
@@ -101,14 +114,17 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
             } else {
                 // Manual control when navigation is not active
                 performManualControl();
+                // Always show AprilTag detection debug info
+                performAprilTagDebug();
             }
-
-            // Always update telemetry at the end of each loop
-            telemetry.update();
-            lastTelemetryUpdate = currentTime;
             
-            // Small delay to prevent overwhelming the telemetry system
-            sleep(50);
+            // Track detection history for debugging
+            trackDetectionHistory();
+
+            // Update telemetry
+            telemetry.update();
+            
+            // No sleep - maximum responsiveness for AprilTag detection
         }
     }
 
@@ -146,12 +162,28 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
 
                 if (targetTag != null) {
                     telemetry.addData("*** TARGET TAG FOUND ***", "ID: " + TARGET_APRILTAG_ID);
+                    telemetry.addData("Tag X Position", String.format("%.2f°", targetTag.getTargetXDegrees()));
+                    telemetry.addData("Tag Y Position", String.format("%.2f°", targetTag.getTargetYDegrees()));
+                    lastTagDetectionTime = System.currentTimeMillis();
+                    tagRecentlyDetected = true;
                     // Tag found! Navigate to it
                     navigateToTag(targetTag);
                 } else {
-                    telemetry.addData("Target Tag Status", "AprilTag ID " + TARGET_APRILTAG_ID + " not in view");
-                    telemetry.addData("Action", "Rotating to find tag");
-                    rotateToFindTag();
+                    // Check if we recently detected the tag (within last 500ms)
+                    long currentTime = System.currentTimeMillis();
+                    if (tagRecentlyDetected && (currentTime - lastTagDetectionTime) < 500) {
+                        telemetry.addData("Target Tag Status", "Recently detected, continuing navigation");
+                        telemetry.addData("Time since detection", String.format("%d ms", currentTime - lastTagDetectionTime));
+                        // Continue with last known navigation or stop motors
+                        stopAllMotors();
+                    } else {
+                        tagRecentlyDetected = false;
+                        telemetry.addData("Target Tag Status", "AprilTag ID " + TARGET_APRILTAG_ID + " not in view");
+                        telemetry.addData("Available Tag IDs", getAvailableTagIds(fiducialResults));
+                        telemetry.addData("Action", "Rotating to find tag");
+                        telemetry.addData("Debug", "Check 'While Rotating' section below for detection");
+                        rotateToFindTag();
+                    }
                 }
             } else {
                 telemetry.addData("Limelight Status", "Invalid result - rotating");
@@ -166,10 +198,12 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
     private void navigateToTag(LLResultTypes.FiducialResult tag) {
         telemetry.addData("--- Navigating to Tag ---", "");
         
-        // Get tag position data from the main result (not individual fiducial)
+        // Get tag position data from the specific fiducial result
+        double tx = tag.getTargetXDegrees(); // Horizontal offset from center (-29.8 to 29.8 degrees)
+        double ty = tag.getTargetYDegrees(); // Vertical offset from center (-24.85 to 24.85 degrees)
+        
+        // Get the main result for area calculation
         LLResult result = limelight.getLatestResult();
-        double tx = result.getTx(); // Horizontal offset from center (-29.8 to 29.8 degrees)
-        double ty = result.getTy(); // Vertical offset from center (-24.85 to 24.85 degrees)
         double ta = result.getTa(); // Target area (0-100% of image)
         
         telemetry.addData("Target Tag ID", tag.getFiducialId());
@@ -234,8 +268,42 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
         telemetry.addData("--- Searching for Tag ---", "");
         telemetry.addData("Action", "Rotating slowly to find AprilTag ID " + TARGET_APRILTAG_ID);
         telemetry.addData("Rotation Speed", String.format("%.2f", ROTATION_SPEED));
-        // Rotate slowly to find the tag
-        setMotorPowers(0, 0, ROTATION_SPEED);
+        
+        // Aggressive detection checking - check multiple times per loop
+        boolean targetFound = false;
+        for (int i = 0; i < 3; i++) {
+            LLResult result = limelight.getLatestResult();
+            if (result != null && result.isValid()) {
+                List<LLResultTypes.FiducialResult> fiducialResults = result.getFiducialResults();
+                if (i == 0) { // Only show telemetry on first check to avoid spam
+                    telemetry.addData("While Rotating - Fiducials", fiducialResults.size());
+                    if (fiducialResults.size() > 0) {
+                        telemetry.addData("While Rotating - Available IDs", getAvailableTagIds(fiducialResults));
+                    }
+                }
+                
+                // Check if target is detected while rotating
+                for (LLResultTypes.FiducialResult fiducial : fiducialResults) {
+                    if (fiducial.getFiducialId() == TARGET_APRILTAG_ID) {
+                        telemetry.addData("*** TARGET DETECTED WHILE ROTATING ***", "ID: " + TARGET_APRILTAG_ID);
+                        telemetry.addData("Rotating - Tag X", String.format("%.2f°", fiducial.getTargetXDegrees()));
+                        telemetry.addData("Rotating - Tag Y", String.format("%.2f°", fiducial.getTargetYDegrees()));
+                        telemetry.addData("Detection Check", "Attempt " + (i + 1) + " of 3");
+                        // Stop rotation immediately when target is found
+                        stopAllMotors();
+                        targetFound = true;
+                        break;
+                    }
+                }
+                if (targetFound) break;
+            }
+            // No sleep between checks - maximum responsiveness
+        }
+        
+        if (!targetFound) {
+            // Rotate slowly to find the tag
+            setMotorPowers(0, 0, ROTATION_SPEED);
+        }
     }
 
     private double calculateDistanceFromArea(double area) {
@@ -292,6 +360,93 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
         motorBackRight.setPower(0);
     }
 
+    private void performAprilTagDebug() {
+        telemetry.addData("--- AprilTag Debug (Stationary) ---", "");
+        
+        LLResult result = limelight.getLatestResult();
+        telemetry.addData("Limelight Result", result != null ? "Received" : "NULL");
+        
+        if (result != null) {
+            telemetry.addData("Result Valid", result.isValid());
+            telemetry.addData("Result TX", String.format("%.2f", result.getTx()));
+            telemetry.addData("Result TY", String.format("%.2f", result.getTy()));
+            telemetry.addData("Result TA", String.format("%.2f", result.getTa()));
+            // Simplified debug - avoid telemetry overflow
+            telemetry.addData("Result Type", result.getClass().getSimpleName());
+            
+            if (result.isValid()) {
+                List<LLResultTypes.FiducialResult> fiducialResults = result.getFiducialResults();
+                telemetry.addData("Fiducials Detected", fiducialResults.size());
+                
+                if (fiducialResults.size() > 0) {
+                    telemetry.addData("Available Tag IDs", getAvailableTagIds(fiducialResults));
+                    
+                    // Display all detected fiducials with detailed info
+                    for (int i = 0; i < fiducialResults.size(); i++) {
+                        LLResultTypes.FiducialResult fiducial = fiducialResults.get(i);
+                        telemetry.addData("Tag " + i + " ID", fiducial.getFiducialId());
+                        telemetry.addData("Tag " + i + " X", String.format("%.2f°", fiducial.getTargetXDegrees()));
+                        telemetry.addData("Tag " + i + " Y", String.format("%.2f°", fiducial.getTargetYDegrees()));
+                        
+                        // Highlight if this is our target tag
+                        if (fiducial.getFiducialId() == TARGET_APRILTAG_ID) {
+                            telemetry.addData("*** TARGET FOUND ***", "ID: " + TARGET_APRILTAG_ID);
+                            telemetry.addData("Target X Position", String.format("%.2f°", fiducial.getTargetXDegrees()));
+                            telemetry.addData("Target Y Position", String.format("%.2f°", fiducial.getTargetYDegrees()));
+                        }
+                    }
+                } else {
+                    telemetry.addData("No AprilTags Detected", "Check camera view and lighting");
+                }
+            } else {
+                telemetry.addData("Limelight Status", "Invalid result - check camera connection");
+            }
+        } else {
+            telemetry.addData("Limelight Status", "No result - check camera connection");
+        }
+        
+        telemetry.addData("Target Tag ID", TARGET_APRILTAG_ID);
+        telemetry.addData("Pipeline", "9 (AprilTag IDs 20-24)");
+    }
+
+    private void trackDetectionHistory() {
+        long currentTime = System.currentTimeMillis();
+        
+        // Check for target tag detection every loop
+        LLResult result = limelight.getLatestResult();
+        if (result != null && result.isValid()) {
+            List<LLResultTypes.FiducialResult> fiducialResults = result.getFiducialResults();
+            for (LLResultTypes.FiducialResult fiducial : fiducialResults) {
+                if (fiducial.getFiducialId() == TARGET_APRILTAG_ID) {
+                    detectionHistoryCount++;
+                    lastTagDetectionTime = currentTime;
+                    tagRecentlyDetected = true;
+                    break;
+                }
+            }
+        }
+        
+        // Show detection history in telemetry
+        telemetry.addData("Detection History", "Target detected " + detectionHistoryCount + " times");
+        if (tagRecentlyDetected) {
+            long timeSinceDetection = currentTime - lastTagDetectionTime;
+            telemetry.addData("Last Detection", String.format("%d ms ago", timeSinceDetection));
+        }
+    }
+
+    private String getAvailableTagIds(List<LLResultTypes.FiducialResult> fiducialResults) {
+        if (fiducialResults.isEmpty()) {
+            return "None";
+        }
+        
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < fiducialResults.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(fiducialResults.get(i).getFiducialId());
+        }
+        return sb.toString();
+    }
+
     private void performManualControl() {
         telemetry.addData("--- Manual Control ---", "");
         
@@ -327,5 +482,6 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
 
         telemetry.addData("Instructions", "Use left stick to drive, right stick X to rotate");
         telemetry.addData("Press A", "to start AprilTag navigation");
+        telemetry.addData("Debug Info", "AprilTag detection shown below when stationary");
     }
 }
