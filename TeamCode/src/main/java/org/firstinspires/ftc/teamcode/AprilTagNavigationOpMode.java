@@ -23,10 +23,12 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
     private static final int TARGET_APRILTAG_ID = 20;
     private static final double TARGET_DISTANCE_FEET = 3.0; // 3 feet in front of tag
     private static final double TARGET_DISTANCE_INCHES = TARGET_DISTANCE_FEET * 12.0;
-    private static final double ROTATION_SPEED = 0.4; // Speed for turning when tag not in view (increased now that detection works)
+    private static final double ROTATION_SPEED = 0.4; // Speed for turning when tag not in view
+    private static final double FINE_ROTATION_SPEED = 0.15; // Slower speed for fine adjustments when tag is in view
     private static final double MOVEMENT_SPEED = 0.4; // Speed for moving towards tag
     private static final double POSITION_TOLERANCE = 2.0; // Tolerance in inches
     private static final double ANGLE_TOLERANCE = 5.0; // Tolerance in degrees
+    private static final double FINE_ANGLE_TOLERANCE = 1.0; // Very tight tolerance for fine adjustments
     
     // State variables
     private boolean navigationActive = false;
@@ -35,6 +37,7 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
     private long lastTagDetectionTime = 0;
     private boolean tagRecentlyDetected = false;
     private int detectionHistoryCount = 0;
+    private boolean isNavigatingToTag = false; // New state to track if we're actively navigating
 
     @Override
     public void runOpMode() throws InterruptedException {
@@ -94,6 +97,8 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
             telemetry.addData("Loop Counter", loopCounter);
             telemetry.addData("Navigation Active", navigationActive);
             telemetry.addData("A Button Pressed", gamepad1.a);
+            telemetry.addData("Is Navigating to Tag", isNavigatingToTag);
+            telemetry.addData("Tag Recently Detected", tagRecentlyDetected);
             
             // Check for button press to start/stop navigation
             boolean currentButtonState = gamepad1.a;
@@ -166,37 +171,46 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
                     telemetry.addData("Tag Y Position", String.format("%.2f°", targetTag.getTargetYDegrees()));
                     lastTagDetectionTime = System.currentTimeMillis();
                     tagRecentlyDetected = true;
+                    isNavigatingToTag = true; // Set navigation state
+                    telemetry.addData("DEBUG: Calling navigateToTag()", "Tag detected - should NOT rotate");
                     // Tag found! Navigate to it
                     navigateToTag(targetTag);
                 } else {
-                    // Check if we recently detected the tag (within last 500ms)
+                    // Check if we recently detected the tag (within last 1000ms - longer grace period)
                     long currentTime = System.currentTimeMillis();
-                    if (tagRecentlyDetected && (currentTime - lastTagDetectionTime) < 500) {
+                    if (tagRecentlyDetected && (currentTime - lastTagDetectionTime) < 1000) {
                         telemetry.addData("Target Tag Status", "Recently detected, continuing navigation");
                         telemetry.addData("Time since detection", String.format("%d ms", currentTime - lastTagDetectionTime));
+                        telemetry.addData("Navigation State", "Holding position - tag temporarily out of view");
+                        telemetry.addData("DEBUG: STOPPING ALL MOTORS", "Tag recently detected - no rotation");
                         // Continue with last known navigation or stop motors
                         stopAllMotors();
                     } else {
                         tagRecentlyDetected = false;
+                        isNavigatingToTag = false; // Clear navigation state
                         telemetry.addData("Target Tag Status", "AprilTag ID " + TARGET_APRILTAG_ID + " not in view");
                         telemetry.addData("Available Tag IDs", getAvailableTagIds(fiducialResults));
                         telemetry.addData("Action", "Rotating to find tag");
-                        telemetry.addData("Debug", "Check 'While Rotating' section below for detection");
+                        telemetry.addData("DEBUG: Calling rotateToFindTag()", "No tag detected - will rotate");
                         rotateToFindTag();
                     }
                 }
             } else {
                 telemetry.addData("Limelight Status", "Invalid result - rotating");
+                telemetry.addData("DEBUG: Calling rotateToFindTag()", "Invalid result - will rotate");
                 rotateToFindTag();
             }
         } else {
             telemetry.addData("Limelight Status", "No result - rotating");
+            telemetry.addData("DEBUG: Calling rotateToFindTag()", "No result - will rotate");
             rotateToFindTag();
         }
     }
 
     private void navigateToTag(LLResultTypes.FiducialResult tag) {
         telemetry.addData("--- Navigating to Tag ---", "");
+        telemetry.addData("Navigation State", "ACTIVE - Tag detected");
+        telemetry.addData("DEBUG: NO ROTATION MODE", "This method should NEVER rotate!");
         
         // Get tag position data from the specific fiducial result
         double tx = tag.getTargetXDegrees(); // Horizontal offset from center (-29.8 to 29.8 degrees)
@@ -212,7 +226,6 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
         telemetry.addData("TA (area)", String.format("%.2f%%", ta));
 
         // Calculate distance from tag (rough estimation based on area)
-        // This is a simplified calculation - you may need to calibrate based on your setup
         double estimatedDistance = calculateDistanceFromArea(ta);
         
         telemetry.addData("Estimated Distance", String.format("%.1f inches", estimatedDistance));
@@ -236,32 +249,41 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
             return;
         }
 
-        // Calculate motor powers for movement
+        // SIMPLIFIED APPROACH: NO ROTATION AT ALL - ONLY FORWARD/BACKWARD MOVEMENT
         double forwardPower = 0;
         double strafePower = 0;
-        double rotatePower = 0;
+        double rotatePower = 0; // ALWAYS ZERO - NO ROTATION
 
-        // Forward/backward movement based on distance
+        // Only move forward/backward based on distance
         if (Math.abs(distanceError) > POSITION_TOLERANCE) {
             forwardPower = Math.max(-MOVEMENT_SPEED, Math.min(MOVEMENT_SPEED, 
-                -distanceError / TARGET_DISTANCE_INCHES * MOVEMENT_SPEED));
+                distanceError / TARGET_DISTANCE_INCHES * MOVEMENT_SPEED));
+            telemetry.addData("Forward Movement", String.format("Moving %.3f (error: %.1f inches)", forwardPower, distanceError));
+        } else {
+            telemetry.addData("Forward Movement", "Distance OK - no movement needed");
         }
 
-        // Rotation to center the tag
-        if (Math.abs(angleError) > ANGLE_TOLERANCE) {
-            rotatePower = Math.max(-MOVEMENT_SPEED, Math.min(MOVEMENT_SPEED, 
-                -angleError / 30.0 * MOVEMENT_SPEED));
-        }
-
-        telemetry.addData("Calculated Powers", "");
+        telemetry.addData("Final Motor Powers", "");
         telemetry.addData("Forward Power", String.format("%.3f", forwardPower));
         telemetry.addData("Strafe Power", String.format("%.3f", strafePower));
         telemetry.addData("Rotate Power", String.format("%.3f", rotatePower));
+        telemetry.addData("ROTATION POWER", "ALWAYS 0 - NO ROTATION!");
 
-        // Apply movement
+        // Apply movement - NO ROTATION
         setMotorPowers(forwardPower, strafePower, rotatePower);
         
-        telemetry.addData("Action", "Moving towards target");
+        // Action description
+        if (Math.abs(distanceError) > POSITION_TOLERANCE) {
+            telemetry.addData("Action", distanceError > 0 ? "Moving forward (too far)" : "Moving backward (too close)");
+        } else {
+            telemetry.addData("Action", "Positioning complete - holding position");
+        }
+        
+        // Debug information
+        telemetry.addData("Debug Info", "");
+        telemetry.addData("Angle Error", String.format("%.2f°", angleError));
+        telemetry.addData("Rotation Applied", "NEVER - Always 0");
+        telemetry.addData("Will Move Forward", Math.abs(distanceError) > POSITION_TOLERANCE ? "YES" : "NO");
     }
 
     private void rotateToFindTag() {
@@ -269,41 +291,31 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
         telemetry.addData("Action", "Rotating slowly to find AprilTag ID " + TARGET_APRILTAG_ID);
         telemetry.addData("Rotation Speed", String.format("%.2f", ROTATION_SPEED));
         
-        // Aggressive detection checking - check multiple times per loop
-        boolean targetFound = false;
-        for (int i = 0; i < 3; i++) {
-            LLResult result = limelight.getLatestResult();
-            if (result != null && result.isValid()) {
-                List<LLResultTypes.FiducialResult> fiducialResults = result.getFiducialResults();
-                if (i == 0) { // Only show telemetry on first check to avoid spam
-                    telemetry.addData("While Rotating - Fiducials", fiducialResults.size());
-                    if (fiducialResults.size() > 0) {
-                        telemetry.addData("While Rotating - Available IDs", getAvailableTagIds(fiducialResults));
-                    }
-                }
-                
-                // Check if target is detected while rotating
-                for (LLResultTypes.FiducialResult fiducial : fiducialResults) {
-                    if (fiducial.getFiducialId() == TARGET_APRILTAG_ID) {
-                        telemetry.addData("*** TARGET DETECTED WHILE ROTATING ***", "ID: " + TARGET_APRILTAG_ID);
-                        telemetry.addData("Rotating - Tag X", String.format("%.2f°", fiducial.getTargetXDegrees()));
-                        telemetry.addData("Rotating - Tag Y", String.format("%.2f°", fiducial.getTargetYDegrees()));
-                        telemetry.addData("Detection Check", "Attempt " + (i + 1) + " of 3");
-                        // Stop rotation immediately when target is found
-                        stopAllMotors();
-                        targetFound = true;
-                        break;
-                    }
-                }
-                if (targetFound) break;
+        // Check for target tag detection before rotating
+        LLResult result = limelight.getLatestResult();
+        if (result != null && result.isValid()) {
+            List<LLResultTypes.FiducialResult> fiducialResults = result.getFiducialResults();
+            telemetry.addData("While Rotating - Fiducials", fiducialResults.size());
+            if (fiducialResults.size() > 0) {
+                telemetry.addData("While Rotating - Available IDs", getAvailableTagIds(fiducialResults));
             }
-            // No sleep between checks - maximum responsiveness
+            
+            // Check if target is detected
+            for (LLResultTypes.FiducialResult fiducial : fiducialResults) {
+                if (fiducial.getFiducialId() == TARGET_APRILTAG_ID) {
+                    telemetry.addData("*** TARGET DETECTED WHILE ROTATING ***", "ID: " + TARGET_APRILTAG_ID);
+                    telemetry.addData("Rotating - Tag X", String.format("%.2f°", fiducial.getTargetXDegrees()));
+                    telemetry.addData("Rotating - Tag Y", String.format("%.2f°", fiducial.getTargetYDegrees()));
+                    // Stop rotation immediately when target is found
+                    stopAllMotors();
+                    return; // Exit immediately - don't rotate
+                }
+            }
         }
         
-        if (!targetFound) {
-            // Rotate slowly to find the tag
-            setMotorPowers(0, 0, ROTATION_SPEED);
-        }
+        // Only rotate if target not found
+        telemetry.addData("Target Not Found", "Continuing rotation");
+        setMotorPowers(0, 0, ROTATION_SPEED);
     }
 
     private double calculateDistanceFromArea(double area) {
@@ -311,9 +323,11 @@ public class AprilTagNavigationOpMode extends LinearOpMode {
         // You may need to calibrate these values for your specific setup
         // Generally, larger area = closer distance
         if (area > 0) {
-            // Rough estimation: area of 10% corresponds to about 3 feet
-            // This is a very rough approximation and should be calibrated
-            return Math.sqrt(100.0 / area) * 12.0; // Convert to inches
+            // Calibrated estimation: area of 15% corresponds to about 3 feet (36 inches)
+            // Formula: distance = sqrt(calibration_area / current_area) * calibration_distance
+            double calibrationArea = 15.0; // 15% area at calibration distance
+            double calibrationDistance = 36.0; // 3 feet in inches
+            return Math.sqrt(calibrationArea / area) * calibrationDistance;
         }
         return 100.0; // Default large distance if no area data
     }
