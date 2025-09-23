@@ -13,7 +13,7 @@ import java.util.List;
 
 @TeleOp
 @Disabled
-public class AprilTagNavigationOpMode extends LinearOpMode {
+public class NavigateToAprilTag20 extends LinearOpMode {
 
     private Limelight3A limelight;
     private DcMotor motorFrontLeft;

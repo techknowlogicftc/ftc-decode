@@ -21,6 +21,7 @@ import com.qualcomm.hardware.lynx.LynxModule;
 import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
@@ -123,6 +124,11 @@ public class SampleMecanumDrive extends MecanumDrive {
         }
 
         // TODO: reverse any motors using DcMotor.setDirection()
+        // Reverse right side motors to match MyFirstOpMode configuration
+        rightFront.setDirection(DcMotor.Direction.REVERSE);
+        rightRear.setDirection(DcMotor.Direction.REVERSE);
+
+
 
         List<Integer> lastTrackingEncPositions = new ArrayList<>();
         List<Integer> lastTrackingEncVels = new ArrayList<>();
@@ -251,6 +257,22 @@ public class SampleMecanumDrive extends MecanumDrive {
         }
 
         setDrivePower(vel);
+    }
+
+    /**
+     * Helper method to set drive power with corrected coordinate mapping for this robot.
+     * This method handles the coordinate transformation needed for proper movement.
+     * 
+     * @param forwardBackward Forward/backward movement (-1.0 to 1.0, positive = forward)
+     * @param leftRight Strafe left/right movement (-1.0 to 1.0, positive = right)
+     * @param turnLeftRight Turn left/right (-1.0 to 1.0, positive = clockwise)
+     */
+    public void setCorrectedDrivePower(double forwardBackward, double leftRight, double turnLeftRight) {
+        setWeightedDrivePower(new Pose2d(
+            forwardBackward,    // X (forward/backward)
+            -leftRight,         // Y (strafe) - inverted for correct direction
+            -turnLeftRight      // Heading (turn) - inverted for correct direction
+        ));
     }
 
     @NonNull

@@ -5,12 +5,14 @@ import android.annotation.SuppressLint;
 import com.qualcomm.hardware.limelightvision.LLResult;
 import com.qualcomm.hardware.limelightvision.LLResultTypes;
 import com.qualcomm.hardware.limelightvision.Limelight3A;
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
 import java.util.List;
 
 @TeleOp(name = "AprilTag Debug Dump Test", group = "Test")
+@Disabled
 public class AprilTagDetectionTest extends LinearOpMode {
 
     private Limelight3A limelight;
